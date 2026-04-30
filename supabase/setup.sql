@@ -233,6 +233,68 @@ SELECT cron.schedule(
     $$
 );
 
+-- ────────────────────────────────────────────────────────────
+-- 9. 赫布搜索（SQL 端觸發連接 + Touch + Reconsolidation）
+-- ────────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION hebbian_search(keyword TEXT)
+RETURNS SETOF memories AS $$
+DECLARE
+  results UUID[];
+  top5 UUID[];
+  i INTEGER;
+  j INTEGER;
+  s_id UUID;
+  t_id UUID;
+  existing_id UUID;
+  existing_weight REAL;
+BEGIN
+  SELECT ARRAY(
+    SELECT id FROM memories
+    WHERE status = 'active' AND content ILIKE '%' || keyword || '%'
+    LIMIT 20
+  ) INTO results;
+
+  IF array_length(results, 1) IS NULL THEN RETURN; END IF;
+
+  UPDATE memories
+  SET access_count = access_count + 1,
+      last_accessed = NOW(),
+      emotion_score = CASE
+        WHEN protected = FALSE AND unresolved = FALSE
+        THEN emotion_score * 0.95 + 0.5 * 0.05
+        ELSE emotion_score END
+  WHERE id = ANY(results);
+
+  SELECT ARRAY(
+    SELECT id FROM memories
+    WHERE id = ANY(results) AND unresolved = FALSE
+    ORDER BY emotion_score * 0.3 + LEAST(access_count::real / 50, 1) * 0.1 DESC
+    LIMIT 5
+  ) INTO top5;
+
+  IF array_length(top5, 1) >= 2 THEN
+    FOR i IN 1..array_length(top5, 1) LOOP
+      FOR j IN (i+1)..array_length(top5, 1) LOOP
+        IF top5[i] < top5[j] THEN s_id := top5[i]; t_id := top5[j];
+        ELSE s_id := top5[j]; t_id := top5[i]; END IF;
+        SELECT id, weight INTO existing_id, existing_weight
+        FROM synapses WHERE source_id = s_id AND target_id = t_id;
+        IF existing_id IS NOT NULL THEN
+          UPDATE synapses SET weight = LEAST(existing_weight + 0.1, 10.0),
+            last_strengthened = NOW() WHERE id = existing_id;
+        ELSE
+          INSERT INTO synapses (source_id, target_id, weight, origin)
+          VALUES (s_id, t_id, 0.1, 'hebbian');
+        END IF;
+      END LOOP;
+    END LOOP;
+  END IF;
+
+  RETURN QUERY SELECT * FROM memories WHERE id = ANY(results) ORDER BY created_at DESC;
+END;
+$$ LANGUAGE plpgsql;
+
 -- ============================================================
 -- 完成
 -- ============================================================
