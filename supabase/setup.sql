@@ -95,7 +95,19 @@ CREATE TABLE comments (
 );
 
 -- ────────────────────────────────────────────────────────────
--- 4. 全文搜索
+-- 4. Iris 觀察筆記
+-- ────────────────────────────────────────────────────────────
+
+CREATE TABLE iris_notes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    content TEXT NOT NULL,
+    password TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ────────────────────────────────────────────────────────────
+-- 5. 全文搜索
 -- ────────────────────────────────────────────────────────────
 
 ALTER TABLE memories ADD COLUMN fts tsvector
@@ -104,11 +116,15 @@ ALTER TABLE memories ADD COLUMN fts tsvector
     ) STORED;
 
 -- ────────────────────────────────────────────────────────────
--- 5. 索引
+-- 6. 索引
 -- ────────────────────────────────────────────────────────────
+
+-- 中文搜索需要 trigram
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- memories
 CREATE INDEX idx_memories_fts ON memories USING GIN(fts);
+CREATE INDEX idx_memories_content_trgm ON memories USING GIN(content gin_trgm_ops);
 CREATE INDEX idx_memories_type ON memories(type);
 CREATE INDEX idx_memories_tier ON memories(tier);
 CREATE INDEX idx_memories_author ON memories(author);
@@ -132,19 +148,21 @@ CREATE INDEX idx_comments_unread_iris ON comments(author, read_by_iris)
     WHERE author = 'lux' AND read_by_iris IS NULL;
 
 -- ────────────────────────────────────────────────────────────
--- 6. RLS（個人工具，全開放）
+-- 7. RLS（個人工具，全開放）
 -- ────────────────────────────────────────────────────────────
 
 ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE synapses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE comments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE iris_notes ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "open" ON memories FOR ALL USING (true);
 CREATE POLICY "open" ON synapses FOR ALL USING (true);
 CREATE POLICY "open" ON comments FOR ALL USING (true);
+CREATE POLICY "open" ON iris_notes FOR ALL USING (true);
 
 -- ────────────────────────────────────────────────────────────
--- 7. Dream Pass（pg_cron · 每天凌晨 3 點）
+-- 8. Dream Pass（pg_cron · 每天凌晨 3 點）
 -- ────────────────────────────────────────────────────────────
 
 CREATE EXTENSION IF NOT EXISTS pg_cron;
