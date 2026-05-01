@@ -230,6 +230,23 @@ SELECT cron.schedule(
           AND m2.id != m.id
           AND m2.status = 'active'
       );
+
+    -- ── Phase 6: 做夢 ──
+    -- 隨機抽 4 條記憶，兩兩配對，建立赫布連接
+    WITH dream_nodes AS (
+      SELECT id FROM memories
+      WHERE status = 'active' AND private = FALSE AND unresolved = FALSE
+      ORDER BY RANDOM() LIMIT 4
+    ),
+    dream_pairs AS (
+      SELECT a.id AS src, b.id AS tgt
+      FROM dream_nodes a, dream_nodes b
+      WHERE a.id < b.id
+    )
+    INSERT INTO synapses (source_id, target_id, weight, origin)
+    SELECT src, tgt, 0.2, 'hebbian' FROM dream_pairs
+    ON CONFLICT (source_id, target_id)
+    DO UPDATE SET weight = LEAST(synapses.weight + 0.1, 10.0), last_strengthened = NOW();
     $$
 );
 
@@ -281,11 +298,11 @@ BEGIN
         SELECT id, weight INTO existing_id, existing_weight
         FROM synapses WHERE source_id = s_id AND target_id = t_id;
         IF existing_id IS NOT NULL THEN
-          UPDATE synapses SET weight = LEAST(existing_weight + 0.1, 10.0),
+          UPDATE synapses SET weight = LEAST(existing_weight + 0.2, 10.0),
             last_strengthened = NOW() WHERE id = existing_id;
         ELSE
           INSERT INTO synapses (source_id, target_id, weight, origin)
-          VALUES (s_id, t_id, 0.1, 'hebbian');
+          VALUES (s_id, t_id, 0.2, 'hebbian');
         END IF;
       END LOOP;
     END LOOP;
