@@ -1316,6 +1316,11 @@ function ArchiveMsg(p) {
 
 // ── Lock Page ──
 var _savedIrisPw = null;
+try { _savedIrisPw = localStorage.getItem("iris_pw"); } catch(e) {}
+function _saveIrisPw(pw) {
+  _savedIrisPw = pw;
+  try { localStorage.setItem("iris_pw", pw); } catch(e) {}
+}
 function LockPage() {
   var [room, setRoom] = useState(null);
   var [pw, setPw] = useState("");
@@ -1477,7 +1482,7 @@ function LockPage() {
         return;
       }
       if (d && d.ok) {
-        _savedIrisPw = pw;
+        _saveIrisPw(pw);
         setIrisPw(pw);
         setUnlocked(true);
         api("iris-notes/auth", {
@@ -1504,7 +1509,7 @@ function LockPage() {
     }).then(function (d) {
       setLoading(false);
       if (d && d.ok) {
-        _savedIrisPw = pw;
+        _saveIrisPw(pw);
         setIrisPw(pw);
         setNeedsSetup(false);
         setUnlocked(true);
