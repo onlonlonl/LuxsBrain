@@ -1351,8 +1351,10 @@ function LockPage() {
   // Copy feedback
   var [copiedKey, setCopiedKey] = useState(null);
   var copiedTimer = useRef(null);
-  // Date input
-  var [dateInput, setDateInput] = useState("");
+  // Calendar
+  var now = new Date();
+  var [calYear, setCalYear] = useState(now.getFullYear());
+  var [calMonth, setCalMonth] = useState(now.getMonth());
   // Search context expansion: { [ri]: { dayMsgs, matchIdx, window } }
   var [expandedSearch, setExpandedSearch] = useState({});
   // Auto-unlock Iris
@@ -1528,19 +1530,26 @@ function LockPage() {
       setDayLoading(false);
     });
   }
-  function shiftDay(offset) {
-    var base = selectedDate || dates[0] || new Date().toISOString().slice(0, 10);
-    var d = new Date(base + "T12:00:00");
-    d.setDate(d.getDate() + offset);
-    var iso = d.toISOString().slice(0, 10);
-    loadDay(iso);
+  function calShiftMonth(offset) {
+    var m = calMonth + offset;
+    var y = calYear;
+    if (m < 0) { m = 11; y--; }
+    if (m > 11) { m = 0; y++; }
+    setCalMonth(m);
+    setCalYear(y);
   }
-  function goToDate() {
-    var v = dateInput.trim();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(v)) {
-      loadDay(v);
-      setDateInput("");
-    }
+  function buildCalDays() {
+    var first = new Date(calYear, calMonth, 1).getDay();
+    var total = new Date(calYear, calMonth + 1, 0).getDate();
+    var cells = [];
+    for (var i = 0; i < first; i++) cells.push(null);
+    for (var d = 1; d <= total; d++) cells.push(d);
+    return cells;
+  }
+  function dayToISO(d) {
+    var mm = String(calMonth + 1).padStart(2, "0");
+    var dd = String(d).padStart(2, "0");
+    return calYear + "-" + mm + "-" + dd;
   }
   function expandMore(ri, matchDate, matchTimestamp) {
     var ex = expandedSearch[ri];
@@ -2102,88 +2111,107 @@ function LockPage() {
   }, "THINKING " + (showThinking ? "\u25CF" : "\u25CB"))),
   // Timeline
   archiveTab === "timeline" && React.createElement("div", null,
-  // Date navigation
+  // Month calendar
+  React.createElement("div", {
+    style: {
+      border: "2px solid " + C.borderLight,
+      background: C.card,
+      padding: 10,
+      marginBottom: 12
+    }
+  },
+  // Month header
   React.createElement("div", {
     style: {
       display: "flex",
-      gap: 6,
-      marginBottom: 8,
-      alignItems: "center"
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: 8
     }
   }, React.createElement("div", {
-    onClick: function () { shiftDay(-1); },
+    onClick: function () { calShiftMonth(-1); },
     style: {
-      padding: "4px 10px",
+      padding: "2px 8px",
       fontSize: 10,
       cursor: "pointer",
-      border: "2px solid " + C.text,
-      background: C.card,
+      border: "1px solid " + C.borderLight,
       color: C.text
     }
-  }, "\u2190"), React.createElement("input", {
-    value: dateInput,
-    onChange: function (e) { setDateInput(e.target.value); },
-    onKeyDown: function (e) { if (e.key === "Enter") goToDate(); },
-    placeholder: selectedDate || "YYYY-MM-DD",
+  }, "\u2190"), React.createElement("span", {
     style: {
-      flex: 1,
-      padding: "4px 8px",
-      border: "2px solid " + C.text,
-      background: C.card,
-      fontFamily: "inherit",
       fontSize: 10,
-      color: C.text,
-      boxSizing: "border-box",
-      outline: "none",
-      textAlign: "center"
+      letterSpacing: 2,
+      color: C.text
     }
-  }), React.createElement("div", {
-    onClick: function () { goToDate(); },
+  }, calYear + " / " + String(calMonth + 1).padStart(2, "0")), React.createElement("div", {
+    onClick: function () { calShiftMonth(1); },
     style: {
-      padding: "4px 8px",
-      fontSize: 9,
-      cursor: "pointer",
-      border: "2px solid " + C.text,
-      background: C.primaryPale,
-      color: C.text,
-      letterSpacing: 1
-    }
-  }, "GO"), React.createElement("div", {
-    onClick: function () { shiftDay(1); },
-    style: {
-      padding: "4px 10px",
+      padding: "2px 8px",
       fontSize: 10,
       cursor: "pointer",
-      border: "2px solid " + C.text,
-      background: C.card,
+      border: "1px solid " + C.borderLight,
       color: C.text
     }
   }, "\u2192")),
-  // Quick date buttons
-  dates.length > 0 && React.createElement("div", {
+  // Weekday labels
+  React.createElement("div", {
     style: {
-      display: "flex",
-      flexWrap: "wrap",
-      gap: 4,
-      marginBottom: 12
+      display: "grid",
+      gridTemplateColumns: "repeat(7, 1fr)",
+      gap: 2,
+      marginBottom: 2
     }
-  }, dates.map(function (d) {
-    var dayStr = d.slice(5);
+  }, ["S", "M", "T", "W", "T", "F", "S"].map(function (w, i) {
     return React.createElement("div", {
-      key: d,
-      onClick: function () {
-        loadDay(d);
-      },
+      key: i,
       style: {
-        padding: "3px 8px",
+        textAlign: "center",
+        fontSize: 7,
+        color: C.textMuted,
+        letterSpacing: 1
+      }
+    }, w);
+  })),
+  // Day cells
+  React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "repeat(7, 1fr)",
+      gap: 2
+    }
+  }, buildCalDays().map(function (d, i) {
+    if (d === null) return React.createElement("div", { key: "e" + i });
+    var iso = dayToISO(d);
+    var hasData = dates.indexOf(iso) >= 0;
+    var isSel = selectedDate === iso;
+    return React.createElement("div", {
+      key: i,
+      onClick: function () { loadDay(iso); },
+      style: {
+        aspectRatio: "1",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
         fontSize: 9,
         cursor: "pointer",
-        border: "1px solid " + (selectedDate === d ? C.text : C.borderLight),
-        background: selectedDate === d ? C.primaryPale : C.card,
-        color: selectedDate === d ? C.text : C.textMuted
+        border: isSel ? "2px solid " + C.text : "1px solid " + C.borderLight,
+        background: isSel ? C.primaryPale : hasData ? C.primaryPale + "88" : "transparent",
+        color: isSel ? C.text : hasData ? C.accent : C.textMuted,
+        fontWeight: isSel ? "bold" : "normal",
+        position: "relative"
       }
-    }, dayStr);
-  })),
+    }, d, hasData && !isSel && React.createElement("div", {
+      style: {
+        position: "absolute",
+        bottom: 2,
+        left: "50%",
+        transform: "translateX(-50%)",
+        width: 3,
+        height: 3,
+        background: C.accent
+      }
+    }));
+  }))),
   // Day content
   selectedDate && React.createElement("div", null, dayLoading ? React.createElement(Loading) : React.createElement("div", null, React.createElement("div", {
     style: {
