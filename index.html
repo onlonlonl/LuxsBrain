@@ -1343,6 +1343,13 @@ function LockPage() {
   var [expandedTurns, setExpandedTurns] = useState(3);
   var [selStart, setSelStart] = useState(null);
   var [selEnd, setSelEnd] = useState(null);
+  // Search selection (per-group)
+  var [searchSelGroup, setSearchSelGroup] = useState(null);
+  var [searchSelStart, setSearchSelStart] = useState(null);
+  var [searchSelEnd, setSearchSelEnd] = useState(null);
+  // Copy feedback
+  var [copiedKey, setCopiedKey] = useState(null);
+  var copiedTimer = useRef(null);
   function handleSelect(i) {
     if (selStart === null) {
       setSelStart(i);
@@ -1368,6 +1375,36 @@ function LockPage() {
   }
   function isInRange(i) {
     var r = getSelRange();
+    if (!r) return false;
+    return i >= r[0] && i <= r[1];
+  }
+  function handleSearchSelect(gi, mi) {
+    if (searchSelGroup !== gi) {
+      setSearchSelGroup(gi);
+      setSearchSelStart(mi);
+      setSearchSelEnd(null);
+    } else if (searchSelStart !== null && searchSelEnd === null) {
+      if (mi === searchSelStart) {
+        setSearchSelStart(null);
+        setSearchSelGroup(null);
+      } else {
+        setSearchSelEnd(mi);
+      }
+    } else {
+      setSearchSelGroup(gi);
+      setSearchSelStart(mi);
+      setSearchSelEnd(null);
+    }
+  }
+  function getSearchSelRange(gi) {
+    if (searchSelGroup !== gi || searchSelStart === null) return null;
+    if (searchSelEnd === null) return [searchSelStart, searchSelStart];
+    var a = Math.min(searchSelStart, searchSelEnd),
+      b = Math.max(searchSelStart, searchSelEnd);
+    return [a, b];
+  }
+  function isSearchInRange(gi, i) {
+    var r = getSearchSelRange(gi);
     if (!r) return false;
     return i >= r[0] && i <= r[1];
   }
@@ -1452,23 +1489,35 @@ function LockPage() {
     api("archive/" + date + "?thinking=" + showThinking).then(function (d) {
       setDayMessages(Array.isArray(d) ? d : []);
       setDayLoading(false);
+    }).catch(function () {
+      setDayMessages([]);
+      setDayLoading(false);
     });
   }
   function doSearch() {
     if (!searchQ.trim()) return;
     setSearchLoading(true);
+    setSearchSelGroup(null);
+    setSearchSelStart(null);
+    setSearchSelEnd(null);
     api("archive-search?q=" + encodeURIComponent(searchQ) + "&thinking=" + showThinking + "&context=5").then(function (d) {
       setSearchResults(Array.isArray(d) ? d : []);
       setSearchLoading(false);
     });
   }
-  function copyText(msgs) {
+  function copyText(msgs, key) {
     var text = msgs.map(function (m) {
       var label = m.speaker === "lux_thinking" ? "LUX (thinking)" : m.speaker === "iris" ? "IRIS" : "LUX";
       var time = (m.timestamp || "").slice(11, 16);
       return (time ? "[" + time + "] " : "") + label + "\n" + m.content;
     }).join("\n\n---\n\n");
-    navigator.clipboard.writeText(text).catch(function () {});
+    navigator.clipboard.writeText(text).then(function () {
+      setCopiedKey(key);
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(function () {
+        setCopiedKey(null);
+      }, 1500);
+    }).catch(function () {});
   }
 
   // Two doors
@@ -2007,18 +2056,18 @@ function LockPage() {
   }, getSelRange() && React.createElement("div", {
     onClick: function () {
       var r = getSelRange();
-      copyText(dayMessages.slice(r[0], r[1] + 1));
+      copyText(dayMessages.slice(r[0], r[1] + 1), "timeline");
     },
     style: {
       padding: "3px 8px",
       fontSize: 8,
       letterSpacing: 1,
       cursor: "pointer",
-      border: "2px solid " + C.text,
-      color: C.text,
+      border: "2px solid " + (copiedKey === "timeline" ? C.accent : C.text),
+      color: copiedKey === "timeline" ? C.accent : C.text,
       background: C.primaryPale
     }
-  }, "COPY SELECTED"), getSelRange() && React.createElement("div", {
+  }, copiedKey === "timeline" ? "\u2713 COPIED" : "COPY SELECTED"), getSelRange() && React.createElement("div", {
     onClick: function () {
       setSelStart(null);
       setSelEnd(null);
@@ -2123,6 +2172,7 @@ function LockPage() {
       marginBottom: 8
     }
   }, searchResults.length + " RESULTS"), searchResults.map(function (r, ri) {
+    var sr = getSearchSelRange(ri);
     return React.createElement("div", {
       key: ri,
       style: {
@@ -2146,8 +2196,29 @@ function LockPage() {
         letterSpacing: 1
       }
     }, r.match.session_date + " " + (r.match.timestamp || "").slice(11, 16)), React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 6,
+        alignItems: "center"
+      }
+    }, sr && React.createElement("div", {
       onClick: function () {
-        copyText(r.context);
+        copyText(r.context.slice(sr[0], sr[1] + 1), "search-sel-" + ri);
+      },
+      style: {
+        padding: "2px 8px",
+        fontSize: 8,
+        letterSpacing: 1,
+        cursor: "pointer",
+        border: "2px solid " + (copiedKey === "search-sel-" + ri ? C.accent : C.text),
+        color: copiedKey === "search-sel-" + ri ? C.accent : C.text,
+        background: C.primaryPale
+      }
+    }, copiedKey === "search-sel-" + ri ? "\u2713 COPIED" : "COPY SELECTED"), sr && React.createElement("div", {
+      onClick: function () {
+        setSearchSelGroup(null);
+        setSearchSelStart(null);
+        setSearchSelEnd(null);
       },
       style: {
         padding: "2px 8px",
@@ -2157,14 +2228,37 @@ function LockPage() {
         border: "1px solid " + C.borderLight,
         color: C.textMuted
       }
-    }, "COPY")), React.createElement("div", {
+    }, "CLEAR"), React.createElement("div", {
+      onClick: function () {
+        copyText(r.context, "search-" + ri);
+      },
+      style: {
+        padding: "2px 8px",
+        fontSize: 8,
+        letterSpacing: 1,
+        cursor: "pointer",
+        border: "1px solid " + (copiedKey === "search-" + ri ? C.accent : C.borderLight),
+        color: copiedKey === "search-" + ri ? C.accent : C.textMuted
+      }
+    }, copiedKey === "search-" + ri ? "\u2713 COPIED" : "COPY ALL"))), React.createElement("div", {
       style: {
         padding: 6
       }
-    }, r.context.map(function (m, i) {
+    }, !sr && React.createElement("div", {
+      style: {
+        fontSize: 8,
+        color: C.borderLight,
+        marginBottom: 4,
+        fontStyle: "italic"
+      }
+    }, "tap to select range"), r.context.map(function (m, i) {
       return React.createElement(ArchiveMsg, {
         key: i,
-        msg: m
+        msg: m,
+        selected: isSearchInRange(ri, i),
+        onSelect: function () {
+          handleSearchSelect(ri, i);
+        }
       });
     })));
   }))), React.createElement(Footer));
