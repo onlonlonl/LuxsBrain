@@ -10,8 +10,8 @@
 <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: 'DotGothic16', monospace; background: #fdfaf9; color: #784840; -webkit-tap-highlight-color: transparent; }
-input, textarea, button { font-family: 'DotGothic16', monospace; }
+body { font-family: "DotGothic16", monospace; background: #fdfaf9; color: #784840; -webkit-tap-highlight-color: transparent; }
+input, textarea, button { font-family: "DotGothic16", monospace; }
 ::-webkit-scrollbar { display: none; }
 </style>
 </head>
@@ -1271,14 +1271,17 @@ function ArchiveMsg(p) {
   var isThinking = m.speaker === "lux_thinking";
   var label = isThinking ? "LUX (thinking)" : m.speaker === "iris" ? "IRIS" : "LUX";
   var time = (m.timestamp || "").slice(11, 16);
+  var sel = p.selected;
   return React.createElement("div", {
+    onClick: p.onSelect,
     style: {
       padding: "8px 10px",
       marginBottom: 4,
-      background: isThinking ? "#f8f0ee" : m.speaker === "iris" ? C.card : C.primaryPale,
-      border: "1px solid " + C.borderLight,
+      background: sel ? "#f0e0dc" : isThinking ? "#f8f0ee" : m.speaker === "iris" ? C.card : C.primaryPale,
+      border: sel ? "2px solid " + C.primary : "1px solid " + C.borderLight,
       opacity: isThinking ? 0.7 : 1,
-      borderLeft: isThinking ? "3px dashed " + C.border : m.speaker === "iris" ? "3px solid " + C.primary : "3px solid " + C.accent
+      borderLeft: sel ? "3px solid " + C.amber : isThinking ? "3px dashed " + C.border : m.speaker === "iris" ? "3px solid " + C.primary : "3px solid " + C.accent,
+      cursor: p.onSelect ? "pointer" : "default"
     }
   }, React.createElement("div", {
     style: {
@@ -1338,6 +1341,36 @@ function LockPage() {
   var [searchResults, setSearchResults] = useState([]);
   var [searchLoading, setSearchLoading] = useState(false);
   var [expandedTurns, setExpandedTurns] = useState(3);
+  var [selStart, setSelStart] = useState(null);
+  var [selEnd, setSelEnd] = useState(null);
+  function handleSelect(i) {
+    if (selStart === null) {
+      setSelStart(i);
+      setSelEnd(null);
+    } else if (selEnd === null) {
+      if (i === selStart) {
+        setSelStart(null);
+      } else {
+        setSelEnd(i);
+      }
+      ;
+    } else {
+      setSelStart(null);
+      setSelEnd(null);
+    }
+  }
+  function getSelRange() {
+    if (selStart === null) return null;
+    if (selEnd === null) return [selStart, selStart];
+    var a = Math.min(selStart, selEnd),
+      b = Math.max(selStart, selEnd);
+    return [a, b];
+  }
+  function isInRange(i) {
+    var r = getSelRange();
+    if (!r) return false;
+    return i >= r[0] && i <= r[1];
+  }
   function unlockLux() {
     setLoading(true);
     setError(false);
@@ -1414,6 +1447,8 @@ function LockPage() {
     setSelectedDate(date);
     setDayLoading(true);
     setExpandedTurns(3);
+    setSelStart(null);
+    setSelEnd(null);
     api("archive/" + date + "?thinking=" + showThinking).then(function (d) {
       setDayMessages(Array.isArray(d) ? d : []);
       setDayLoading(false);
@@ -1965,8 +2000,28 @@ function LockPage() {
   }, selectedDate + " \u00B7 " + dayMessages.filter(function (m) {
     return m.speaker !== "lux_thinking";
   }).length + " MESSAGES"), React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6
+    }
+  }, getSelRange() && React.createElement("div", {
     onClick: function () {
-      copyText(dayMessages.slice(0, expandedTurns * 3));
+      var r = getSelRange();
+      copyText(dayMessages.slice(r[0], r[1] + 1));
+    },
+    style: {
+      padding: "3px 8px",
+      fontSize: 8,
+      letterSpacing: 1,
+      cursor: "pointer",
+      border: "2px solid " + C.text,
+      color: C.text,
+      background: C.primaryPale
+    }
+  }, "COPY SELECTED"), getSelRange() && React.createElement("div", {
+    onClick: function () {
+      setSelStart(null);
+      setSelEnd(null);
     },
     style: {
       padding: "3px 8px",
@@ -1976,10 +2031,21 @@ function LockPage() {
       border: "1px solid " + C.borderLight,
       color: C.textMuted
     }
-  }, "COPY")), dayMessages.slice(0, expandedTurns * 3).map(function (m, i) {
+  }, "CLEAR"))), !getSelRange() && React.createElement("div", {
+    style: {
+      fontSize: 8,
+      color: C.borderLight,
+      marginBottom: 6,
+      fontStyle: "italic"
+    }
+  }, "tap to select start \u2192 tap to select end \u2192 copy"), dayMessages.slice(0, expandedTurns * 3).map(function (m, i) {
     return React.createElement(ArchiveMsg, {
       key: i,
-      msg: m
+      msg: m,
+      selected: isInRange(i),
+      onSelect: function () {
+        handleSelect(i);
+      }
     });
   }), expandedTurns * 3 < dayMessages.length && React.createElement("div", {
     onClick: function () {
