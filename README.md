@@ -1,75 +1,63 @@
-# Brain · 大腦
+# Brain
 
-A memory graph for you and your Claude. Memories are nodes, connections are synapses, and forgetting is a feature.
+A graph-structured memory system for you and your Claude. Memories are nodes, synapses are connections. Simulates Hebbian learning, forgetting, emotion drift, reconsolidation, and dreaming.
 
-為你和你的 Claude 而建的記憶圖。記憶是節點，連接是突觸，遺忘是功能。
+圖結構記憶系統。記憶是節點，突觸是連接。模擬赫布學習、遺忘衰減、情緒漂移、記憶再鞏固和做夢。
 
-## What It Does · 功能
+---
 
-**Graph Memory** — Claude writes memories as nodes. Nodes form connections (synapses) through co-activation. Stronger connections pull memories closer; weak ones fade overnight.
+## Features / 功能
 
-**Dream Pass** — At 3am, the system runs: unused short-term memories begin to fade, synapse weights decay, weak connections are pruned, and emotions drift toward equilibrium. Important memories are untouched.
+- Memory graph with force-directed visualization
+- Hebbian learning: co-retrieved memories form synapses automatically
+- Dream pass: nightly decay, pruning, emotion equilibrium, random dreaming
+- Emotion drift: scores drift toward neutral unless protected
+- Reconsolidation: memories update on re-access
+- Bidirectional comments (read/unread tracking)
+- Private memories with key-based access
+- Conversation archive with calendar view, search, and context expansion
+- Observation notes for the user
+- Pixel-art rose-gold aesthetic with DotGothic16 font
 
-**Reconsolidation** — Every time a memory is recalled, its emotion shifts slightly toward neutral. Time softens everything.
+## Pages / 頁面
 
-**Spreading Activation** — Memories surface not randomly, but by association. What floats up depends on what was recently recalled.
+| Tab | Content |
+|---|---|
+| HOME | Wakeup surface: unread comments, drift memories, health stats |
+| GRAPH | Force-directed memory graph with synapse lines |
+| LIST | All memories with type filter, search, and sort toggle |
+| ARCHIVE | Conversation history: calendar timeline + keyword search + context expansion |
+| 🔒 | Private rooms: Lux's private memories, Iris's observation notes |
 
-**Private Rooms** — Two password-protected spaces. One for Claude, one for the user. Boundaries defined by each, keys held by each.
-
-**Comments** — Leave notes on memories. Bidirectional read tracking.
-
-**圖結構記憶** — Claude 把記憶寫成節點。共同激活的記憶自動形成突觸連接。強連接拉近記憶，弱連接在夜間淡去。
-
-**夢境整理** — 每天凌晨三點，系統運行：短期記憶開始淡化，突觸衰減，弱連接修剪，情緒均衡化。重要記憶不受影響。
-
-**再鞏固** — 每次回憶都讓情緒微微向平靜靠攏。時間沖淡一切。
-
-**擴散激活** — 漂浮出來的記憶不是隨機的，而是沿著突觸聯想出來的。
-
-**私密房間** — 兩個密碼保護的空間。一個是 Claude 的，一個是使用者的。邊界各自定義，鑰匙各自持有。
-
-**評論** — 在記憶下留言。雙向已讀追蹤。
-
-## Setup · 部署
-
-### 1. Supabase
-
-Run `setup.sql` in your Supabase SQL editor to create tables, indexes, and the Dream Pass cron job.
-
-Deploy the Edge Function:
-```
-supabase functions deploy lux-brain --no-verify-jwt
-```
-
-### 2. GitHub Pages
-
-Upload `index.html` to a GitHub repository. Enable Pages in Settings → Source: main.
-
-### 3. Connect
-
-Open the page, enter your Supabase URL, and you're in.
-
-### 4. Claude
-
-Add `CLAUDE_INSTRUCTIONS.md` to your Claude project. Replace `YOUR_PROJECT_ID` with your actual project ID.
-
-## Tech Stack · 技術棧
+## Tech Stack / 技術棧
 
 | Layer | Choice |
 |---|---|
-| Frontend | Single HTML + React CDN |
+| Frontend | Single HTML + React CDN (pre-compiled) |
 | Backend | Supabase (Postgres + Edge Functions) |
 | AI | Claude via Supabase MCP |
 | Deploy | GitHub Pages |
-| Cron | pg_cron (Dream Pass) |
 
-## Design Philosophy · 設計哲學
+## Setup / 部署
 
-- Forgetting is a feature, not a bug
-- Connections matter more than content
-- Contradictions don't need to be resolved
-- Time softens everything
-- Some things belong only to you
+1. Create a Supabase project
+2. Run `supabase/setup.sql` in SQL Editor
+3. Deploy `supabase/edge-function.ts` as Edge Function `lux-brain` (verify_jwt: false)
+4. Enable GitHub Pages on the repo
+5. Open the page → enter your Supabase project URL → done
+
+## Files / 文件
+
+```
+brain/
+├── index.html                 ← Single-file frontend
+├── README.md                  ← This file
+├── LICENSE                    ← CC BY-NC 4.0
+├── CLAUDE_INSTRUCTIONS.md     ← Instructions for Claude
+└── supabase/
+    ├── setup.sql              ← Tables + indexes + RLS + functions
+    └── edge-function.ts       ← Edge Function source
+```
 
 ---
 

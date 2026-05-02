@@ -194,6 +194,9 @@ function TopNav(p) {
     id: "list",
     label: "LIST"
   }, {
+    id: "archive",
+    label: "ARCHIVE"
+  }, {
     id: "lock",
     label: "lock"
   }];
@@ -1117,6 +1120,7 @@ function ListPage() {
   var [filter, setFilter] = useState("all");
   var [search, setSearch] = useState("");
   var [expanded, setExpanded] = useState(null);
+  var [sortAsc, setSortAsc] = useState(false);
   var types = ["all", "core", "diary", "treasure", "feeling", "observation"];
   useEffect(function () {
     api("graph").then(function (d) {
@@ -1130,6 +1134,9 @@ function ListPage() {
     if (search && m.content && m.content.indexOf(search) === -1) return false;
     if (search && m.private) return false;
     return true;
+  }).sort(function (a, b) {
+    var ta = a.created_at || ""; var tb = b.created_at || "";
+    return sortAsc ? ta.localeCompare(tb) : tb.localeCompare(ta);
   });
   return React.createElement("div", {
     style: {
@@ -1179,12 +1186,28 @@ function ListPage() {
     }, t);
   })), React.createElement("div", {
     style: {
-      fontSize: 9,
-      color: C.textMuted,
-      letterSpacing: 1,
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
       marginBottom: 10
     }
-  }, filtered.length + " MEMORIES"), filtered.map(function (m) {
+  }, React.createElement("span", {
+    style: {
+      fontSize: 9,
+      color: C.textMuted,
+      letterSpacing: 1
+    }
+  }, filtered.length + " MEMORIES"), React.createElement("div", {
+    onClick: function () { setSortAsc(!sortAsc); },
+    style: {
+      padding: "3px 8px",
+      fontSize: 8,
+      letterSpacing: 1,
+      cursor: "pointer",
+      border: "1px solid " + C.borderLight,
+      color: C.textMuted
+    }
+  }, sortAsc ? "OLD \u2191" : "NEW \u2191")), filtered.map(function (m) {
     var isExp = expanded === m.id;
     return React.createElement("div", {
       key: m.id,
@@ -1314,6 +1337,191 @@ function ArchiveMsg(p) {
   }, m.content));
 }
 
+// ── Archive Page (standalone) ──
+function ArchivePage() {
+  var [archiveTab, setArchiveTab] = useState("timeline");
+  var [dates, setDates] = useState([]);
+  var [selectedDate, setSelectedDate] = useState(null);
+  var [dayMessages, setDayMessages] = useState([]);
+  var [dayLoading, setDayLoading] = useState(false);
+  var [showThinking, setShowThinking] = useState(false);
+  var [searchQ, setSearchQ] = useState("");
+  var [searchResults, setSearchResults] = useState([]);
+  var [searchLoading, setSearchLoading] = useState(false);
+  var [expandedTurns, setExpandedTurns] = useState(3);
+  var [selStart, setSelStart] = useState(null);
+  var [selEnd, setSelEnd] = useState(null);
+  var [searchSelGroup, setSearchSelGroup] = useState(null);
+  var [searchSelStart, setSearchSelStart] = useState(null);
+  var [searchSelEnd, setSearchSelEnd] = useState(null);
+  var [copiedKey, setCopiedKey] = useState(null);
+  var copiedTimer = useRef(null);
+  var now = new Date();
+  var [calYear, setCalYear] = useState(now.getFullYear());
+  var [calMonth, setCalMonth] = useState(now.getMonth());
+  var [expandedSearch, setExpandedSearch] = useState({});
+  // Load dates on mount
+  useEffect(function () {
+    api("archive/dates").then(function (r) {
+      if (Array.isArray(r)) setDates(r);
+    });
+  }, []);
+  // Timeline selection
+  function handleSelect(i) {
+    if (selStart === null) { setSelStart(i); setSelEnd(null); }
+    else if (selEnd === null) { if (i === selStart) { setSelStart(null); } else { setSelEnd(i); } }
+    else { setSelStart(null); setSelEnd(null); }
+  }
+  function getSelRange() {
+    if (selStart === null) return null;
+    if (selEnd === null) return [selStart, selStart];
+    var a = Math.min(selStart, selEnd), b = Math.max(selStart, selEnd);
+    return [a, b];
+  }
+  function isInRange(i) { var r = getSelRange(); if (!r) return false; return i >= r[0] && i <= r[1]; }
+  // Search selection
+  function handleSearchSelect(gi, mi) {
+    if (searchSelGroup !== gi) { setSearchSelGroup(gi); setSearchSelStart(mi); setSearchSelEnd(null); }
+    else if (searchSelStart !== null && searchSelEnd === null) { if (mi === searchSelStart) { setSearchSelStart(null); setSearchSelGroup(null); } else { setSearchSelEnd(mi); } }
+    else { setSearchSelGroup(gi); setSearchSelStart(mi); setSearchSelEnd(null); }
+  }
+  function getSearchSelRange(gi) {
+    if (searchSelGroup !== gi || searchSelStart === null) return null;
+    if (searchSelEnd === null) return [searchSelStart, searchSelStart];
+    var a = Math.min(searchSelStart, searchSelEnd), b = Math.max(searchSelStart, searchSelEnd);
+    return [a, b];
+  }
+  function isSearchInRange(gi, i) { var r = getSearchSelRange(gi); if (!r) return false; return i >= r[0] && i <= r[1]; }
+  // Load day
+  function loadDay(date) {
+    setSelectedDate(date); setDayLoading(true); setExpandedTurns(3); setSelStart(null); setSelEnd(null);
+    api("archive/" + date + "?thinking=" + showThinking).then(function (d) {
+      setDayMessages(Array.isArray(d) ? d : []); setDayLoading(false);
+    }).catch(function () { setDayMessages([]); setDayLoading(false); });
+  }
+  // Calendar
+  function calShiftMonth(offset) {
+    var m = calMonth + offset; var y = calYear;
+    if (m < 0) { m = 11; y--; } if (m > 11) { m = 0; y++; }
+    setCalMonth(m); setCalYear(y);
+  }
+  function buildCalDays() {
+    var first = new Date(calYear, calMonth, 1).getDay();
+    var total = new Date(calYear, calMonth + 1, 0).getDate();
+    var cells = []; for (var i = 0; i < first; i++) cells.push(null);
+    for (var d = 1; d <= total; d++) cells.push(d); return cells;
+  }
+  function dayToISO(d) {
+    var mm = String(calMonth + 1).padStart(2, "0"); var dd = String(d).padStart(2, "0");
+    return calYear + "-" + mm + "-" + dd;
+  }
+  // Context expansion
+  function expandMore(ri, matchDate, matchTimestamp) {
+    var ex = expandedSearch[ri];
+    if (ex) { var next = Object.assign({}, expandedSearch); next[ri] = Object.assign({}, ex, { window: ex.window + 10 }); setExpandedSearch(next); return; }
+    api("archive/" + matchDate + "?thinking=" + showThinking).then(function (d) {
+      if (!Array.isArray(d)) return;
+      var mIdx = 0; var mTime = (matchTimestamp || "").slice(11, 16);
+      for (var i = 0; i < d.length; i++) { if ((d[i].timestamp || "").slice(11, 16) === mTime) { mIdx = i; break; } }
+      var next = Object.assign({}, expandedSearch); next[ri] = { dayMsgs: d, matchIdx: mIdx, window: 15 }; setExpandedSearch(next);
+    });
+  }
+  function getExpandedMsgs(ri, originalContext) {
+    var ex = expandedSearch[ri]; if (!ex) return originalContext;
+    var start = Math.max(0, ex.matchIdx - ex.window); var end = Math.min(ex.dayMsgs.length, ex.matchIdx + ex.window + 1);
+    return ex.dayMsgs.slice(start, end);
+  }
+  function canExpandMore(ri) {
+    var ex = expandedSearch[ri]; if (!ex) return true;
+    var start = Math.max(0, ex.matchIdx - ex.window); var end = Math.min(ex.dayMsgs.length, ex.matchIdx + ex.window + 1);
+    return start > 0 || end < ex.dayMsgs.length;
+  }
+  // THINKING auto-refresh
+  useEffect(function () {
+    if (selectedDate && archiveTab === "timeline") { loadDay(selectedDate); }
+  }, [showThinking]);
+  // Search
+  function doSearch() {
+    if (!searchQ.trim()) return; setSearchLoading(true);
+    setSearchSelGroup(null); setSearchSelStart(null); setSearchSelEnd(null); setExpandedSearch({});
+    api("archive-search?q=" + encodeURIComponent(searchQ) + "&thinking=" + showThinking + "&context=5").then(function (d) {
+      setSearchResults(Array.isArray(d) ? d : []); setSearchLoading(false);
+    });
+  }
+  // Copy with feedback
+  function copyText(msgs, key) {
+    var text = msgs.map(function (m) {
+      var label = m.speaker === "lux_thinking" ? "LUX (thinking)" : m.speaker === "iris" ? "IRIS" : "LUX";
+      var time = (m.timestamp || "").slice(11, 16);
+      return (time ? "[" + time + "] " : "") + label + "\n" + m.content;
+    }).join("\n\n---\n\n");
+    navigator.clipboard.writeText(text).then(function () {
+      setCopiedKey(key); if (copiedTimer.current) clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(function () { setCopiedKey(null); }, 1500);
+    }).catch(function () {});
+  }
+  // ── Render ──
+  return React.createElement("div", { style: { padding: "16px" } },
+  // Thinking toggle + tab switch
+  React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 } },
+  React.createElement("div", { style: { display: "flex", gap: 6 } },
+  React.createElement("div", { onClick: function () { setArchiveTab("timeline"); }, style: { padding: "4px 10px", fontSize: 9, letterSpacing: 1, cursor: "pointer", border: "1px solid " + (archiveTab === "timeline" ? C.text : C.borderLight), background: archiveTab === "timeline" ? C.primaryPale : C.card, color: archiveTab === "timeline" ? C.text : C.textMuted } }, "TIMELINE"),
+  React.createElement("div", { onClick: function () { setArchiveTab("search"); }, style: { padding: "4px 10px", fontSize: 9, letterSpacing: 1, cursor: "pointer", border: "1px solid " + (archiveTab === "search" ? C.text : C.borderLight), background: archiveTab === "search" ? C.primaryPale : C.card, color: archiveTab === "search" ? C.text : C.textMuted } }, "SEARCH")),
+  React.createElement("div", { onClick: function () { setShowThinking(!showThinking); }, style: { padding: "4px 8px", fontSize: 8, letterSpacing: 1, cursor: "pointer", border: "1px solid " + (showThinking ? C.text : C.borderLight), color: showThinking ? C.text : C.textMuted, background: showThinking ? C.primaryPale : C.card } }, "THINKING " + (showThinking ? "\u25CF" : "\u25CB"))),
+  // Timeline
+  archiveTab === "timeline" && React.createElement("div", null,
+  // Month calendar
+  React.createElement("div", { style: { border: "2px solid " + C.borderLight, background: C.card, padding: 10, marginBottom: 12 } },
+  React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 } },
+  React.createElement("div", { onClick: function () { calShiftMonth(-1); }, style: { padding: "2px 8px", fontSize: 10, cursor: "pointer", border: "1px solid " + C.borderLight, color: C.text } }, "\u2190"),
+  React.createElement("span", { style: { fontSize: 10, letterSpacing: 2, color: C.text } }, calYear + " / " + String(calMonth + 1).padStart(2, "0")),
+  React.createElement("div", { onClick: function () { calShiftMonth(1); }, style: { padding: "2px 8px", fontSize: 10, cursor: "pointer", border: "1px solid " + C.borderLight, color: C.text } }, "\u2192")),
+  React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2, marginBottom: 2 } },
+  ["S", "M", "T", "W", "T", "F", "S"].map(function (w, i) {
+    return React.createElement("div", { key: i, style: { textAlign: "center", fontSize: 7, color: C.textMuted, letterSpacing: 1 } }, w);
+  })),
+  React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2 } },
+  buildCalDays().map(function (d, i) {
+    if (d === null) return React.createElement("div", { key: "e" + i });
+    var iso = dayToISO(d); var hasData = dates.indexOf(iso) >= 0; var isSel = selectedDate === iso;
+    return React.createElement("div", { key: i, onClick: function () { loadDay(iso); }, style: { aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, cursor: "pointer", border: isSel ? "2px solid " + C.text : "1px solid " + C.borderLight, background: isSel ? C.primaryPale : hasData ? C.primaryPale + "88" : "transparent", color: isSel ? C.text : hasData ? C.accent : C.textMuted, fontWeight: isSel ? "bold" : "normal", position: "relative" } },
+    d, hasData && !isSel && React.createElement("div", { style: { position: "absolute", bottom: 2, left: "50%", transform: "translateX(-50%)", width: 3, height: 3, background: C.accent } }));
+  }))),
+  // Day content
+  selectedDate && React.createElement("div", null, dayLoading ? React.createElement(Loading) : React.createElement("div", null, React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 } },
+  React.createElement("span", { style: { fontSize: 9, color: C.textMuted, letterSpacing: 1 } }, selectedDate + " \u00B7 " + dayMessages.filter(function (m) { return m.speaker !== "lux_thinking"; }).length + " TURNS"),
+  React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center" } },
+  getSelRange() && React.createElement("div", { onClick: function () { var r = getSelRange(); copyText(dayMessages.slice(r[0], r[1] + 1), "timeline"); }, style: { padding: "3px 8px", fontSize: 8, letterSpacing: 1, cursor: "pointer", border: "2px solid " + (copiedKey === "timeline" ? C.accent : C.text), color: copiedKey === "timeline" ? C.accent : C.text, background: C.primaryPale } }, copiedKey === "timeline" ? "\u2713 COPIED" : "COPY SELECTED"),
+  getSelRange() && React.createElement("div", { onClick: function () { setSelStart(null); setSelEnd(null); }, style: { padding: "3px 8px", fontSize: 8, letterSpacing: 1, cursor: "pointer", border: "1px solid " + C.borderLight, color: C.textMuted } }, "CLEAR"))),
+  !getSelRange() && React.createElement("div", { style: { fontSize: 8, color: C.borderLight, marginBottom: 4, fontStyle: "italic" } }, "tap to select range"),
+  dayMessages.slice(0, expandedTurns * 30).map(function (m, i) {
+    return React.createElement(ArchiveMsg, { key: i, msg: m, selected: isInRange(i), onSelect: function () { handleSelect(i); } });
+  }),
+  dayMessages.length > expandedTurns * 30 && React.createElement("div", { onClick: function () { setExpandedTurns(expandedTurns + 3); }, style: { padding: "6px", textAlign: "center", fontSize: 9, color: C.textMuted, cursor: "pointer", border: "1px dashed " + C.borderLight, marginTop: 4 } }, "MORE \u2195")))),
+  // Search
+  archiveTab === "search" && React.createElement("div", null,
+  React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 12 } },
+  React.createElement("input", { value: searchQ, onChange: function (e) { setSearchQ(e.target.value); }, onKeyDown: function (e) { if (e.key === "Enter") doSearch(); }, placeholder: "\u641C\u7D22\u5C0D\u8A71...", style: { flex: 1, padding: "6px 10px", border: "2px solid " + C.text, background: C.card, fontFamily: "inherit", fontSize: 11, color: C.text, outline: "none" } }),
+  React.createElement("div", { onClick: doSearch, style: { padding: "6px 14px", fontSize: 9, letterSpacing: 1, cursor: "pointer", border: "2px solid " + C.text, background: C.primaryPale, color: C.text } }, "GO")),
+  searchLoading && React.createElement(Loading),
+  !searchLoading && searchResults.length > 0 && React.createElement("div", null, React.createElement("div", { style: { fontSize: 9, color: C.textMuted, letterSpacing: 1, marginBottom: 8 } }, searchResults.length + " RESULTS"),
+  searchResults.map(function (r, ri) {
+    var sr = getSearchSelRange(ri); var msgs = getExpandedMsgs(ri, r.context);
+    return React.createElement("div", { key: ri, style: { border: "2px solid " + C.borderLight, marginBottom: 10, overflow: "hidden" } },
+    React.createElement("div", { style: { padding: "5px 10px", background: C.primaryPale, borderBottom: "1px solid " + C.borderLight, display: "flex", justifyContent: "space-between", alignItems: "center" } },
+    React.createElement("span", { style: { fontSize: 9, color: C.textMuted, letterSpacing: 1 } }, r.match.session_date + " " + (r.match.timestamp || "").slice(11, 16) + (expandedSearch[ri] ? " \u00B7 " + msgs.length + "/" + expandedSearch[ri].dayMsgs.length : "")),
+    React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center" } },
+    sr && React.createElement("div", { onClick: function () { copyText(msgs.slice(sr[0], sr[1] + 1), "search-sel-" + ri); }, style: { padding: "2px 8px", fontSize: 8, letterSpacing: 1, cursor: "pointer", border: "2px solid " + (copiedKey === "search-sel-" + ri ? C.accent : C.text), color: copiedKey === "search-sel-" + ri ? C.accent : C.text, background: C.primaryPale } }, copiedKey === "search-sel-" + ri ? "\u2713 COPIED" : "COPY SELECTED"),
+    sr && React.createElement("div", { onClick: function () { setSearchSelGroup(null); setSearchSelStart(null); setSearchSelEnd(null); }, style: { padding: "2px 8px", fontSize: 8, letterSpacing: 1, cursor: "pointer", border: "1px solid " + C.borderLight, color: C.textMuted } }, "CLEAR"),
+    React.createElement("div", { onClick: function () { copyText(msgs, "search-" + ri); }, style: { padding: "2px 8px", fontSize: 8, letterSpacing: 1, cursor: "pointer", border: "1px solid " + (copiedKey === "search-" + ri ? C.accent : C.borderLight), color: copiedKey === "search-" + ri ? C.accent : C.textMuted } }, copiedKey === "search-" + ri ? "\u2713 COPIED" : "COPY ALL"))),
+    React.createElement("div", { style: { padding: 6 } },
+    !sr && React.createElement("div", { style: { fontSize: 8, color: C.borderLight, marginBottom: 4, fontStyle: "italic" } }, "tap to select range"),
+    msgs.map(function (m, i) { return React.createElement(ArchiveMsg, { key: i, msg: m, selected: isSearchInRange(ri, i), onSelect: function () { handleSearchSelect(ri, i); } }); }),
+    canExpandMore(ri) && React.createElement("div", { onClick: function () { setSearchSelGroup(null); setSearchSelStart(null); setSearchSelEnd(null); expandMore(ri, r.match.session_date, r.match.timestamp); }, style: { padding: "6px", textAlign: "center", fontSize: 9, color: C.textMuted, cursor: "pointer", border: "1px dashed " + C.borderLight, marginTop: 4 } }, "MORE \u2195")));
+  }))),
+  React.createElement(Footer));
+}
+
 // ── Lock Page ──
 var _savedIrisPw = null;
 try { _savedIrisPw = localStorage.getItem("iris_pw"); } catch(e) {}
@@ -1336,32 +1544,6 @@ function LockPage() {
   var [editingId, setEditingId] = useState(null);
   var [editContent, setEditContent] = useState("");
   var [newNote, setNewNote] = useState("");
-  // Archive
-  var [archiveTab, setArchiveTab] = useState("timeline");
-  var [dates, setDates] = useState([]);
-  var [selectedDate, setSelectedDate] = useState(null);
-  var [dayMessages, setDayMessages] = useState([]);
-  var [dayLoading, setDayLoading] = useState(false);
-  var [showThinking, setShowThinking] = useState(false);
-  var [searchQ, setSearchQ] = useState("");
-  var [searchResults, setSearchResults] = useState([]);
-  var [searchLoading, setSearchLoading] = useState(false);
-  var [expandedTurns, setExpandedTurns] = useState(3);
-  var [selStart, setSelStart] = useState(null);
-  var [selEnd, setSelEnd] = useState(null);
-  // Search selection (per-group)
-  var [searchSelGroup, setSearchSelGroup] = useState(null);
-  var [searchSelStart, setSearchSelStart] = useState(null);
-  var [searchSelEnd, setSearchSelEnd] = useState(null);
-  // Copy feedback
-  var [copiedKey, setCopiedKey] = useState(null);
-  var copiedTimer = useRef(null);
-  // Calendar
-  var now = new Date();
-  var [calYear, setCalYear] = useState(now.getFullYear());
-  var [calMonth, setCalMonth] = useState(now.getMonth());
-  // Search context expansion: { [ri]: { dayMsgs, matchIdx, window } }
-  var [expandedSearch, setExpandedSearch] = useState({});
   // Auto-unlock Iris
   useEffect(function () {
     if (room === "iris" && !unlocked && _savedIrisPw) {
@@ -1380,73 +1562,14 @@ function LockPage() {
           }).then(function (r) {
             if (r && r.notes) setIrisNotes(r.notes);
           });
-          api("archive/dates").then(function (r) {
-            if (Array.isArray(r)) setDates(r);
-          });
         } else {
           _savedIrisPw = null;
         }
       });
     }
   }, [room]);
-  function handleSelect(i) {
-    if (selStart === null) {
-      setSelStart(i);
-      setSelEnd(null);
-    } else if (selEnd === null) {
-      if (i === selStart) {
-        setSelStart(null);
-      } else {
-        setSelEnd(i);
-      }
-      ;
-    } else {
-      setSelStart(null);
-      setSelEnd(null);
-    }
-  }
-  function getSelRange() {
-    if (selStart === null) return null;
-    if (selEnd === null) return [selStart, selStart];
-    var a = Math.min(selStart, selEnd),
-      b = Math.max(selStart, selEnd);
-    return [a, b];
-  }
-  function isInRange(i) {
-    var r = getSelRange();
-    if (!r) return false;
-    return i >= r[0] && i <= r[1];
-  }
-  function handleSearchSelect(gi, mi) {
-    if (searchSelGroup !== gi) {
-      setSearchSelGroup(gi);
-      setSearchSelStart(mi);
-      setSearchSelEnd(null);
-    } else if (searchSelStart !== null && searchSelEnd === null) {
-      if (mi === searchSelStart) {
-        setSearchSelStart(null);
-        setSearchSelGroup(null);
-      } else {
-        setSearchSelEnd(mi);
-      }
-    } else {
-      setSearchSelGroup(gi);
-      setSearchSelStart(mi);
-      setSearchSelEnd(null);
-    }
-  }
-  function getSearchSelRange(gi) {
-    if (searchSelGroup !== gi || searchSelStart === null) return null;
-    if (searchSelEnd === null) return [searchSelStart, searchSelStart];
-    var a = Math.min(searchSelStart, searchSelEnd),
-      b = Math.max(searchSelStart, searchSelEnd);
-    return [a, b];
-  }
-  function isSearchInRange(gi, i) {
-    var r = getSearchSelRange(gi);
-    if (!r) return false;
-    return i >= r[0] && i <= r[1];
-  }
+
+  // Two doors
   function unlockLux() {
     setLoading(true);
     setError(false);
@@ -1493,9 +1616,6 @@ function LockPage() {
         }).then(function (r) {
           if (r && r.notes) setIrisNotes(r.notes);
         });
-        api("archive/dates").then(function (r) {
-          if (Array.isArray(r)) setDates(r);
-        });
       }
     });
   }
@@ -1513,120 +1633,10 @@ function LockPage() {
         setIrisPw(pw);
         setNeedsSetup(false);
         setUnlocked(true);
-        api("archive/dates").then(function (r) {
-          if (Array.isArray(r)) setDates(r);
-        });
       } else {
         setError(true);
       }
     });
-  }
-  function loadDay(date) {
-    setSelectedDate(date);
-    setDayLoading(true);
-    setExpandedTurns(3);
-    setSelStart(null);
-    setSelEnd(null);
-    api("archive/" + date + "?thinking=" + showThinking).then(function (d) {
-      setDayMessages(Array.isArray(d) ? d : []);
-      setDayLoading(false);
-    }).catch(function () {
-      setDayMessages([]);
-      setDayLoading(false);
-    });
-  }
-  function calShiftMonth(offset) {
-    var m = calMonth + offset;
-    var y = calYear;
-    if (m < 0) { m = 11; y--; }
-    if (m > 11) { m = 0; y++; }
-    setCalMonth(m);
-    setCalYear(y);
-  }
-  function buildCalDays() {
-    var first = new Date(calYear, calMonth, 1).getDay();
-    var total = new Date(calYear, calMonth + 1, 0).getDate();
-    var cells = [];
-    for (var i = 0; i < first; i++) cells.push(null);
-    for (var d = 1; d <= total; d++) cells.push(d);
-    return cells;
-  }
-  function dayToISO(d) {
-    var mm = String(calMonth + 1).padStart(2, "0");
-    var dd = String(d).padStart(2, "0");
-    return calYear + "-" + mm + "-" + dd;
-  }
-  function expandMore(ri, matchDate, matchTimestamp) {
-    var ex = expandedSearch[ri];
-    if (ex) {
-      // already fetched, just widen window
-      var next = Object.assign({}, expandedSearch);
-      next[ri] = Object.assign({}, ex, { window: ex.window + 10 });
-      setExpandedSearch(next);
-      return;
-    }
-    // fetch full day
-    api("archive/" + matchDate + "?thinking=" + showThinking).then(function (d) {
-      if (!Array.isArray(d)) return;
-      // find match by timestamp
-      var mIdx = 0;
-      var mTime = (matchTimestamp || "").slice(11, 16);
-      for (var i = 0; i < d.length; i++) {
-        if ((d[i].timestamp || "").slice(11, 16) === mTime) {
-          mIdx = i;
-          break;
-        }
-      }
-      var next = Object.assign({}, expandedSearch);
-      next[ri] = { dayMsgs: d, matchIdx: mIdx, window: 15 };
-      setExpandedSearch(next);
-    });
-  }
-  function getExpandedMsgs(ri, originalContext) {
-    var ex = expandedSearch[ri];
-    if (!ex) return originalContext;
-    var start = Math.max(0, ex.matchIdx - ex.window);
-    var end = Math.min(ex.dayMsgs.length, ex.matchIdx + ex.window + 1);
-    return ex.dayMsgs.slice(start, end);
-  }
-  function canExpandMore(ri) {
-    var ex = expandedSearch[ri];
-    if (!ex) return true;
-    var start = Math.max(0, ex.matchIdx - ex.window);
-    var end = Math.min(ex.dayMsgs.length, ex.matchIdx + ex.window + 1);
-    return start > 0 || end < ex.dayMsgs.length;
-  }
-  // THINKING toggle auto-refresh
-  useEffect(function () {
-    if (selectedDate && archiveTab === "timeline") {
-      loadDay(selectedDate);
-    }
-  }, [showThinking]);
-  function doSearch() {
-    if (!searchQ.trim()) return;
-    setSearchLoading(true);
-    setSearchSelGroup(null);
-    setSearchSelStart(null);
-    setSearchSelEnd(null);
-    setExpandedSearch({});
-    api("archive-search?q=" + encodeURIComponent(searchQ) + "&thinking=" + showThinking + "&context=5").then(function (d) {
-      setSearchResults(Array.isArray(d) ? d : []);
-      setSearchLoading(false);
-    });
-  }
-  function copyText(msgs, key) {
-    var text = msgs.map(function (m) {
-      var label = m.speaker === "lux_thinking" ? "LUX (thinking)" : m.speaker === "iris" ? "IRIS" : "LUX";
-      var time = (m.timestamp || "").slice(11, 16);
-      return (time ? "[" + time + "] " : "") + label + "\n" + m.content;
-    }).join("\n\n---\n\n");
-    navigator.clipboard.writeText(text).then(function () {
-      setCopiedKey(key);
-      if (copiedTimer.current) clearTimeout(copiedTimer.current);
-      copiedTimer.current = setTimeout(function () {
-        setCopiedKey(null);
-      }, 1500);
-    }).catch(function () {});
   }
 
   // Two doors
@@ -2057,413 +2067,7 @@ function LockPage() {
       }
     }, "EDIT")));
   })),
-  // Archive section
-  React.createElement(Section, {
-    title: "ARCHIVE"
-  },
-  // Thinking toggle + tab switch
-  React.createElement("div", {
-    style: {
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      marginBottom: 12
-    }
-  }, React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 6
-    }
-  }, React.createElement("div", {
-    onClick: function () {
-      setArchiveTab("timeline");
-    },
-    style: {
-      padding: "4px 10px",
-      fontSize: 9,
-      letterSpacing: 1,
-      cursor: "pointer",
-      border: "1px solid " + (archiveTab === "timeline" ? C.text : C.borderLight),
-      background: archiveTab === "timeline" ? C.primaryPale : C.card,
-      color: archiveTab === "timeline" ? C.text : C.textMuted
-    }
-  }, "TIMELINE"), React.createElement("div", {
-    onClick: function () {
-      setArchiveTab("search");
-    },
-    style: {
-      padding: "4px 10px",
-      fontSize: 9,
-      letterSpacing: 1,
-      cursor: "pointer",
-      border: "1px solid " + (archiveTab === "search" ? C.text : C.borderLight),
-      background: archiveTab === "search" ? C.primaryPale : C.card,
-      color: archiveTab === "search" ? C.text : C.textMuted
-    }
-  }, "SEARCH")), React.createElement("div", {
-    onClick: function () {
-      setShowThinking(!showThinking);
-    },
-    style: {
-      padding: "4px 8px",
-      fontSize: 8,
-      letterSpacing: 1,
-      cursor: "pointer",
-      border: "1px solid " + (showThinking ? C.text : C.borderLight),
-      color: showThinking ? C.text : C.textMuted,
-      background: showThinking ? C.primaryPale : C.card
-    }
-  }, "THINKING " + (showThinking ? "\u25CF" : "\u25CB"))),
-  // Timeline
-  archiveTab === "timeline" && React.createElement("div", null,
-  // Month calendar
-  React.createElement("div", {
-    style: {
-      border: "2px solid " + C.borderLight,
-      background: C.card,
-      padding: 10,
-      marginBottom: 12
-    }
-  },
-  // Month header
-  React.createElement("div", {
-    style: {
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      marginBottom: 8
-    }
-  }, React.createElement("div", {
-    onClick: function () { calShiftMonth(-1); },
-    style: {
-      padding: "2px 8px",
-      fontSize: 10,
-      cursor: "pointer",
-      border: "1px solid " + C.borderLight,
-      color: C.text
-    }
-  }, "\u2190"), React.createElement("span", {
-    style: {
-      fontSize: 10,
-      letterSpacing: 2,
-      color: C.text
-    }
-  }, calYear + " / " + String(calMonth + 1).padStart(2, "0")), React.createElement("div", {
-    onClick: function () { calShiftMonth(1); },
-    style: {
-      padding: "2px 8px",
-      fontSize: 10,
-      cursor: "pointer",
-      border: "1px solid " + C.borderLight,
-      color: C.text
-    }
-  }, "\u2192")),
-  // Weekday labels
-  React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: "repeat(7, 1fr)",
-      gap: 2,
-      marginBottom: 2
-    }
-  }, ["S", "M", "T", "W", "T", "F", "S"].map(function (w, i) {
-    return React.createElement("div", {
-      key: i,
-      style: {
-        textAlign: "center",
-        fontSize: 7,
-        color: C.textMuted,
-        letterSpacing: 1
-      }
-    }, w);
-  })),
-  // Day cells
-  React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: "repeat(7, 1fr)",
-      gap: 2
-    }
-  }, buildCalDays().map(function (d, i) {
-    if (d === null) return React.createElement("div", { key: "e" + i });
-    var iso = dayToISO(d);
-    var hasData = dates.indexOf(iso) >= 0;
-    var isSel = selectedDate === iso;
-    return React.createElement("div", {
-      key: i,
-      onClick: function () { loadDay(iso); },
-      style: {
-        aspectRatio: "1",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: 9,
-        cursor: "pointer",
-        border: isSel ? "2px solid " + C.text : "1px solid " + C.borderLight,
-        background: isSel ? C.primaryPale : hasData ? C.primaryPale + "88" : "transparent",
-        color: isSel ? C.text : hasData ? C.accent : C.textMuted,
-        fontWeight: isSel ? "bold" : "normal",
-        position: "relative"
-      }
-    }, d, hasData && !isSel && React.createElement("div", {
-      style: {
-        position: "absolute",
-        bottom: 2,
-        left: "50%",
-        transform: "translateX(-50%)",
-        width: 3,
-        height: 3,
-        background: C.accent
-      }
-    }));
-  }))),
-  // Day content
-  selectedDate && React.createElement("div", null, dayLoading ? React.createElement(Loading) : React.createElement("div", null, React.createElement("div", {
-    style: {
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      marginBottom: 8
-    }
-  }, React.createElement("span", {
-    style: {
-      fontSize: 9,
-      color: C.textMuted,
-      letterSpacing: 1
-    }
-  }, selectedDate + " \u00B7 " + dayMessages.filter(function (m) {
-    return m.speaker !== "lux_thinking";
-  }).length + " MESSAGES"), React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 6
-    }
-  }, getSelRange() && React.createElement("div", {
-    onClick: function () {
-      var r = getSelRange();
-      copyText(dayMessages.slice(r[0], r[1] + 1), "timeline");
-    },
-    style: {
-      padding: "3px 8px",
-      fontSize: 8,
-      letterSpacing: 1,
-      cursor: "pointer",
-      border: "2px solid " + (copiedKey === "timeline" ? C.accent : C.text),
-      color: copiedKey === "timeline" ? C.accent : C.text,
-      background: C.primaryPale
-    }
-  }, copiedKey === "timeline" ? "\u2713 COPIED" : "COPY SELECTED"), getSelRange() && React.createElement("div", {
-    onClick: function () {
-      setSelStart(null);
-      setSelEnd(null);
-    },
-    style: {
-      padding: "3px 8px",
-      fontSize: 8,
-      letterSpacing: 1,
-      cursor: "pointer",
-      border: "1px solid " + C.borderLight,
-      color: C.textMuted
-    }
-  }, "CLEAR"))), !getSelRange() && React.createElement("div", {
-    style: {
-      fontSize: 8,
-      color: C.borderLight,
-      marginBottom: 6,
-      fontStyle: "italic"
-    }
-  }, "tap to select start \u2192 tap to select end \u2192 copy"), dayMessages.slice(0, expandedTurns * 3).map(function (m, i) {
-    return React.createElement(ArchiveMsg, {
-      key: i,
-      msg: m,
-      selected: isInRange(i),
-      onSelect: function () {
-        handleSelect(i);
-      }
-    });
-  }), expandedTurns * 3 < dayMessages.length && React.createElement("div", {
-    onClick: function () {
-      setExpandedTurns(expandedTurns + 5);
-    },
-    style: {
-      padding: "8px",
-      textAlign: "center",
-      fontSize: 9,
-      color: C.textMuted,
-      cursor: "pointer",
-      border: "1px dashed " + C.borderLight,
-      marginTop: 4
-    }
-  }, "more \u2193 (" + (dayMessages.length - expandedTurns * 3) + " remaining)"), expandedTurns * 3 >= dayMessages.length && dayMessages.length > 9 && React.createElement("div", {
-    onClick: function () {
-      setExpandedTurns(3);
-    },
-    style: {
-      padding: "8px",
-      textAlign: "center",
-      fontSize: 9,
-      color: C.textMuted,
-      cursor: "pointer",
-      border: "1px dashed " + C.borderLight,
-      marginTop: 4
-    }
-  }, "collapse \u2191")))),
-  // Search
-  archiveTab === "search" && React.createElement("div", null, React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 6,
-      marginBottom: 12
-    }
-  }, React.createElement("input", {
-    value: searchQ,
-    onChange: function (e) {
-      setSearchQ(e.target.value);
-    },
-    onKeyDown: function (e) {
-      if (e.key === "Enter") doSearch();
-    },
-    placeholder: "\u641C\u7D22\u5C0D\u8A71...",
-    style: {
-      flex: 1,
-      padding: "8px 10px",
-      border: "2px solid " + C.text,
-      background: C.card,
-      fontFamily: "inherit",
-      fontSize: 12,
-      color: C.text,
-      boxSizing: "border-box",
-      outline: "none"
-    }
-  }), React.createElement("div", {
-    onClick: doSearch,
-    style: {
-      padding: "8px 14px",
-      background: C.primary,
-      border: "2px solid " + C.text,
-      color: C.card,
-      fontSize: 10,
-      letterSpacing: 1,
-      cursor: "pointer",
-      display: "flex",
-      alignItems: "center",
-      opacity: searchLoading ? 0.5 : 1
-    }
-  }, searchLoading ? "..." : "GO")), searchResults.length > 0 && React.createElement("div", {
-    style: {
-      fontSize: 9,
-      color: C.textMuted,
-      letterSpacing: 1,
-      marginBottom: 8
-    }
-  }, searchResults.length + " RESULTS"), searchResults.map(function (r, ri) {
-    var sr = getSearchSelRange(ri);
-    var msgs = getExpandedMsgs(ri, r.context);
-    return React.createElement("div", {
-      key: ri,
-      style: {
-        border: "2px solid " + C.borderLight,
-        marginBottom: 10,
-        overflow: "hidden"
-      }
-    }, React.createElement("div", {
-      style: {
-        padding: "5px 10px",
-        background: C.primaryPale,
-        borderBottom: "1px solid " + C.borderLight,
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center"
-      }
-    }, React.createElement("span", {
-      style: {
-        fontSize: 9,
-        color: C.textMuted,
-        letterSpacing: 1
-      }
-    }, r.match.session_date + " " + (r.match.timestamp || "").slice(11, 16) + (expandedSearch[ri] ? " \u00B7 " + msgs.length + "/" + expandedSearch[ri].dayMsgs.length : "")), React.createElement("div", {
-      style: {
-        display: "flex",
-        gap: 6,
-        alignItems: "center"
-      }
-    }, sr && React.createElement("div", {
-      onClick: function () {
-        copyText(msgs.slice(sr[0], sr[1] + 1), "search-sel-" + ri);
-      },
-      style: {
-        padding: "2px 8px",
-        fontSize: 8,
-        letterSpacing: 1,
-        cursor: "pointer",
-        border: "2px solid " + (copiedKey === "search-sel-" + ri ? C.accent : C.text),
-        color: copiedKey === "search-sel-" + ri ? C.accent : C.text,
-        background: C.primaryPale
-      }
-    }, copiedKey === "search-sel-" + ri ? "\u2713 COPIED" : "COPY SELECTED"), sr && React.createElement("div", {
-      onClick: function () {
-        setSearchSelGroup(null);
-        setSearchSelStart(null);
-        setSearchSelEnd(null);
-      },
-      style: {
-        padding: "2px 8px",
-        fontSize: 8,
-        letterSpacing: 1,
-        cursor: "pointer",
-        border: "1px solid " + C.borderLight,
-        color: C.textMuted
-      }
-    }, "CLEAR"), React.createElement("div", {
-      onClick: function () {
-        copyText(msgs, "search-" + ri);
-      },
-      style: {
-        padding: "2px 8px",
-        fontSize: 8,
-        letterSpacing: 1,
-        cursor: "pointer",
-        border: "1px solid " + (copiedKey === "search-" + ri ? C.accent : C.borderLight),
-        color: copiedKey === "search-" + ri ? C.accent : C.textMuted
-      }
-    }, copiedKey === "search-" + ri ? "\u2713 COPIED" : "COPY ALL"))), React.createElement("div", {
-      style: {
-        padding: 6
-      }
-    }, !sr && React.createElement("div", {
-      style: {
-        fontSize: 8,
-        color: C.borderLight,
-        marginBottom: 4,
-        fontStyle: "italic"
-      }
-    }, "tap to select range"), msgs.map(function (m, i) {
-      return React.createElement(ArchiveMsg, {
-        key: i,
-        msg: m,
-        selected: isSearchInRange(ri, i),
-        onSelect: function () {
-          handleSearchSelect(ri, i);
-        }
-      });
-    }), canExpandMore(ri) && React.createElement("div", {
-      onClick: function () {
-        setSearchSelGroup(null);
-        setSearchSelStart(null);
-        setSearchSelEnd(null);
-        expandMore(ri, r.match.session_date, r.match.timestamp);
-      },
-      style: {
-        padding: "6px",
-        textAlign: "center",
-        fontSize: 9,
-        color: C.textMuted,
-        cursor: "pointer",
-        border: "1px dashed " + C.borderLight,
-        marginTop: 4
-      }
-    }, "MORE \u2195")));
-  }))), React.createElement(Footer));
+  React.createElement(Footer));
 }
 
 // ── App ──
@@ -2483,7 +2087,7 @@ function App() {
   }, React.createElement(TopNav, {
     page: page,
     setPage: setPage
-  }), page === "home" && React.createElement(HomePage), page === "graph" && React.createElement(GraphPage), page === "list" && React.createElement(ListPage), page === "lock" && React.createElement(LockPage))));
+  }), page === "home" && React.createElement(HomePage), page === "graph" && React.createElement(GraphPage), page === "list" && React.createElement(ListPage), page === "archive" && React.createElement(ArchivePage), page === "lock" && React.createElement(LockPage))));
 }
 ReactDOM.render(React.createElement(App), document.getElementById("root"));
 
