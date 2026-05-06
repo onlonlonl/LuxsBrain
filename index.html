@@ -13,12 +13,20 @@
 body { font-family: "DotGothic16", monospace; background: #fdfaf9; color: #784840; -webkit-tap-highlight-color: transparent; }
 input, textarea, button { font-family: "DotGothic16", monospace; }
 ::-webkit-scrollbar { display: none; }
+.letter-md h1, .letter-md h2, .letter-md h3 { font-size: 12px; margin: 10px 0 4px; letter-spacing: 1px; }
+.letter-md p { margin: 6px 0; }
+.letter-md hr { border: none; border-top: 1px dashed #d4b0a8; margin: 12px 0; }
+.letter-md ul, .letter-md ol { padding-left: 16px; margin: 6px 0; }
+.letter-md strong { color: #784840; }
+.letter-md em { font-style: italic; }
+.letter-md blockquote { border-left: 2px solid #d4b0a8; padding-left: 8px; color: #a08078; margin: 6px 0; }
 </style>
 </head>
 <body>
 <div id="root"></div>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
 <script>
 const {
   useState,
@@ -499,6 +507,31 @@ function HomePage() {
   var [loading, setLoading] = useState(true);
   var [letters, setLetters] = useState([]);
   var [openEnv, setOpenEnv] = useState(null);
+  var fileRef = useRef(null);
+  function handleUpload(e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file || !openEnv) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      var content = reader.result;
+      if (!content) return;
+      api("write", {
+        method: "POST",
+        body: JSON.stringify({
+          content: content,
+          type: "letter",
+          emotion_label: openEnv,
+          tier: "core",
+          protected: true,
+          author: "lux"
+        })
+      }).then(function (d) {
+        if (d && d.id) setLetters(letters.concat([d]));
+      });
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  }
   useEffect(function () {
     api("surface").then(function (d) {
       setData(d);
@@ -531,7 +564,7 @@ function HomePage() {
       gap: 8,
       marginBottom: 16
     }
-  }, [{ label: "Iris", key: "iris" }, { label: "Lux", key: "lux" }, { label: "Us", key: "us" }].map(function (env) {
+  }, [{ label: "Iris", key: "iris" }, { label: "Lux", key: "lux" }, { label: "Letter", key: "letter" }].map(function (env) {
     var count = letters.filter(function (l) { return l.emotion_label === env.key; }).length;
     var isOpen = openEnv === env.key;
     return React.createElement("div", {
@@ -567,8 +600,14 @@ function HomePage() {
         }
       }, React.createElement("div", { style: { fontSize: 8, color: C.textMuted, letterSpacing: 1, marginBottom: 6 } },
         (l.created_at || "").slice(0, 10) + " \u00B7 " + (l.author || "").toUpperCase()),
-      React.createElement("div", { style: { fontSize: 11, lineHeight: 1.8, color: C.text, whiteSpace: "pre-wrap" } }, l.content));
-    })),
+      React.createElement("div", { className: "letter-md", style: { fontSize: 11, lineHeight: 1.8, color: C.text }, dangerouslySetInnerHTML: { __html: typeof marked !== "undefined" ? marked.parse(l.content || "") : (l.content || "") } }));
+    }),
+  // Hidden file input + upload button
+  React.createElement("input", { ref: fileRef, type: "file", accept: ".md,.txt", style: { display: "none" }, onChange: handleUpload }),
+  React.createElement("div", {
+    onClick: function () { if (fileRef.current) fileRef.current.click(); },
+    style: { padding: "6px", textAlign: "center", fontSize: 12, color: C.borderLight, cursor: "pointer", border: "1px dashed " + C.borderLight, marginTop: 4 }
+  }, "+")),
   unread.length > 0 && React.createElement(Section, {
     title: unread.length + " UNREAD FROM LUX"
   }, unread.map(function (c) {

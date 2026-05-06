@@ -14,6 +14,7 @@ A graph-structured memory system for you and your Claude. Memories are nodes, sy
 - Emotion drift: scores drift toward neutral unless protected
 - Reconsolidation: memories update on re-access
 - Bidirectional comments (read/unread tracking)
+- Letters: markdown-formatted letters in three envelopes (Iris / Lux / Letter)
 - Private memories with key-based access
 - Conversation archive with calendar view, search, and context expansion
 - Observation notes for the user
@@ -23,7 +24,7 @@ A graph-structured memory system for you and your Claude. Memories are nodes, sy
 
 | Tab | Content |
 |---|---|
-| HOME | Wakeup surface: unread comments, drift memories, health stats |
+| HOME | Letters (3 envelopes), unread comments, drift memories, health stats |
 | GRAPH | Force-directed memory graph with synapse lines |
 | LIST | All memories with type filter, search, and sort toggle |
 | ARCHIVE | Conversation history: calendar timeline + keyword search + context expansion |
