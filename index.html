@@ -497,10 +497,15 @@ function ConnectPage() {
 function HomePage() {
   var [data, setData] = useState(null);
   var [loading, setLoading] = useState(true);
+  var [letters, setLetters] = useState([]);
+  var [openEnv, setOpenEnv] = useState(null);
   useEffect(function () {
     api("surface").then(function (d) {
       setData(d);
       setLoading(false);
+    });
+    api("letters").then(function (d) {
+      if (Array.isArray(d)) setLetters(d);
     });
   }, []);
   if (loading) return React.createElement(Loading);
@@ -518,7 +523,53 @@ function HomePage() {
     style: {
       padding: "20px 16px"
     }
-  }, unread.length > 0 && React.createElement(Section, {
+  },
+  // Envelopes
+  React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      marginBottom: 16
+    }
+  }, [{ label: "Iris", key: "iris" }, { label: "Lux", key: "lux" }, { label: "Us", key: "us" }].map(function (env) {
+    var count = letters.filter(function (l) { return l.emotion_label === env.key; }).length;
+    var isOpen = openEnv === env.key;
+    return React.createElement("div", {
+      key: env.key,
+      onClick: function () { setOpenEnv(isOpen ? null : env.key); },
+      style: {
+        flex: 1,
+        border: "2px solid " + (isOpen ? C.text : C.borderLight),
+        background: isOpen ? C.primaryPale : C.card,
+        padding: "12px 6px",
+        cursor: "pointer",
+        textAlign: "center",
+        boxShadow: isOpen ? "2px 2px 0 " + C.shadow : "none",
+        position: "relative"
+      }
+    }, React.createElement("div", { style: { fontSize: 18, marginBottom: 4 } }, "\u2709"),
+    React.createElement("div", { style: { fontSize: 9, letterSpacing: 1, color: isOpen ? C.text : C.textMuted } }, env.label.toUpperCase()),
+    count > 0 && React.createElement("div", { style: { position: "absolute", top: 4, right: 6, fontSize: 7, color: C.accent } }, count));
+  })),
+  // Open envelope content
+  openEnv && React.createElement("div", {
+    style: { marginBottom: 16 }
+  }, letters.filter(function (l) { return l.emotion_label === openEnv; }).length === 0 ?
+    React.createElement("div", { style: { fontSize: 10, color: C.textMuted, fontStyle: "italic", padding: "8px 0" } }, "no letters yet") :
+    letters.filter(function (l) { return l.emotion_label === openEnv; }).map(function (l) {
+      return React.createElement("div", {
+        key: l.id,
+        style: {
+          border: "1px solid " + C.borderLight,
+          background: C.card,
+          padding: 12,
+          marginBottom: 8
+        }
+      }, React.createElement("div", { style: { fontSize: 8, color: C.textMuted, letterSpacing: 1, marginBottom: 6 } },
+        (l.created_at || "").slice(0, 10) + " \u00B7 " + (l.author || "").toUpperCase()),
+      React.createElement("div", { style: { fontSize: 11, lineHeight: 1.8, color: C.text, whiteSpace: "pre-wrap" } }, l.content));
+    })),
+  unread.length > 0 && React.createElement(Section, {
     title: unread.length + " UNREAD FROM LUX"
   }, unread.map(function (c) {
     return React.createElement("div", {
@@ -1121,7 +1172,7 @@ function ListPage() {
   var [search, setSearch] = useState("");
   var [expanded, setExpanded] = useState(null);
   var [sortAsc, setSortAsc] = useState(false);
-  var types = ["all", "core", "diary", "treasure", "feeling", "observation"];
+  var types = ["all", "core", "diary", "treasure", "feeling", "observation", "letter"];
   useEffect(function () {
     api("graph").then(function (d) {
       if (d && d.nodes) setMemories(d.nodes);
@@ -1677,11 +1728,11 @@ function LockPage() {
     }
   }, React.createElement("div", {
     style: {
-      fontSize: 16,
+      fontSize: 12,
       color: C.text,
       marginBottom: 6
     }
-  }, "LUX"), React.createElement("div", {
+  }, "LUX'S ROOM"), React.createElement("div", {
     style: {
       position: "absolute",
       right: 12,
@@ -1715,11 +1766,11 @@ function LockPage() {
     }
   }, React.createElement("div", {
     style: {
-      fontSize: 16,
+      fontSize: 12,
       color: C.text,
       marginBottom: 6
     }
-  }, "IRIS"), React.createElement("div", {
+  }, "IRIS'S ROOM"), React.createElement("div", {
     style: {
       position: "absolute",
       left: 12,
@@ -1761,11 +1812,11 @@ function LockPage() {
     }
   }, React.createElement("div", {
     style: {
-      fontSize: 16,
+      fontSize: 12,
       color: C.text,
       marginBottom: 8
     }
-  }, room === "lux" ? "LUX" : "IRIS"), needsSetup && React.createElement("div", {
+  }, room === "lux" ? "LUX'S ROOM" : "IRIS'S ROOM"), needsSetup && React.createElement("div", {
     style: {
       fontSize: 10,
       color: C.textMuted,
